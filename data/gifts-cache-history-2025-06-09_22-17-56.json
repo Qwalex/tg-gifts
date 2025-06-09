@@ -1,35 +1,5 @@
 [
   {
-    "id": "5170145012310081615",
-    "sticker": {
-      "width": 512,
-      "height": 512,
-      "emoji": "💝",
-      "is_animated": true,
-      "is_video": false,
-      "type": "custom_emoji",
-      "custom_emoji_id": "5465263910414195580",
-      "thumbnail": {
-        "file_id": "AAMCAgADFQABaEdM5LgU1Up01DgZTX29FVMEHqgAAnwbAAKShNhL-K3EXM8imbUBAAdtAAM2BA",
-        "file_unique_id": "AQADfBsAApKE2Ety",
-        "file_size": 6244,
-        "width": 128,
-        "height": 128
-      },
-      "thumb": {
-        "file_id": "AAMCAgADFQABaEdM5LgU1Up01DgZTX29FVMEHqgAAnwbAAKShNhL-K3EXM8imbUBAAdtAAM2BA",
-        "file_unique_id": "AQADfBsAApKE2Ety",
-        "file_size": 6244,
-        "width": 128,
-        "height": 128
-      },
-      "file_id": "CAACAgIAAxUAAWhHTOS4FNVKdNQ4GU19vRVTBB6oAAJ8GwACkoTYS_itxFzPIpm1NgQ",
-      "file_unique_id": "AgADfBsAApKE2Es",
-      "file_size": 25528
-    },
-    "star_count": 15
-  },
-  {
     "id": "5170233102089322756",
     "sticker": {
       "width": 512,
@@ -57,7 +27,7 @@
       "file_unique_id": "AgADrVQAApo_6Uo",
       "file_size": 51240
     },
-    "star_count": 15
+    "star_count": 151
   },
   {
     "id": "5170250947678437525",

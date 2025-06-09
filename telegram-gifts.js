@@ -234,15 +234,15 @@ function generateDetailedInfo(gift) {
     }
   }
   
-  if (gift.sticker) {
-    lines.push(`Эмодзи: ${gift.sticker.emoji}`);
-    lines.push(`Тип: ${gift.sticker.type}`);
-    lines.push(`Анимированный: ${gift.sticker.is_animated ? 'Да' : 'Нет'}`);
-    lines.push(`Видео: ${gift.sticker.is_video ? 'Да' : 'Нет'}`);
-    if (gift.sticker.custom_emoji_id) {
-      lines.push(`Custom Emoji ID: ${gift.sticker.custom_emoji_id}`);
-    }
-  }
+  // if (gift.sticker) {
+  //   lines.push(`Эмодзи: ${gift.sticker.emoji}`);
+  //   lines.push(`Тип: ${gift.sticker.type}`);
+  //   lines.push(`Анимированный: ${gift.sticker.is_animated ? 'Да' : 'Нет'}`);
+  //   lines.push(`Видео: ${gift.sticker.is_video ? 'Да' : 'Нет'}`);
+  //   if (gift.sticker.custom_emoji_id) {
+  //     lines.push(`Custom Emoji ID: ${gift.sticker.custom_emoji_id}`);
+  //   }
+  // }
   
   return lines.join('\n');
 }
@@ -340,18 +340,160 @@ async function sendStickerInfo(chatId, gift) {
     console.error('Ошибка при отправке стикера:', stickerError.message);
     
     // Если не удалось отправить стикер, отправляем только текстовую информацию
-    try {
-      await bot.sendMessage(chatId, 
-        `🖼️ *Стикер:* ${gift.sticker.emoji}\n` +
-        `📏 Размеры: ${gift.sticker.width}x${gift.sticker.height}\n` +
-        `🔄 Анимированный: ${gift.sticker.is_animated ? 'Да' : 'Нет'}\n` +
-        `🎬 Видео: ${gift.sticker.is_video ? 'Да' : 'Нет'}`, 
-        { parse_mode: 'Markdown' }
-      );
-    } catch (msgError) {
-      console.error('Ошибка при отправке информации о стикере:', msgError.message);
+    // try {
+    //   await bot.sendMessage(chatId, 
+    //     `🖼️ *Стикер:* ${gift.sticker.emoji}\n` +
+    //     `📏 Размеры: ${gift.sticker.width}x${gift.sticker.height}\n` +
+    //     `🔄 Анимированный: ${gift.sticker.is_animated ? 'Да' : 'Нет'}\n` +
+    //     `🎬 Видео: ${gift.sticker.is_video ? 'Да' : 'Нет'}`, 
+    //     { parse_mode: 'Markdown' }
+    //   );
+    // } catch (msgError) {
+    //   console.error('Ошибка при отправке информации о стикере:', msgError.message);
+    // }
+  }
+}
+
+// Функция для сравнения двух подарков и нахождения изменений
+function findGiftChanges(oldGift, newGift) {
+  if (!oldGift || !newGift) return null;
+  
+  const changes = {};
+  
+  // Проверяем основные поля
+  if (oldGift.star_count !== newGift.star_count) {
+    changes.star_count = {
+      old: oldGift.star_count,
+      new: newGift.star_count
+    };
+  }
+  
+  if (oldGift.upgrade_star_count !== newGift.upgrade_star_count) {
+    changes.upgrade_star_count = {
+      old: oldGift.upgrade_star_count,
+      new: newGift.upgrade_star_count
+    };
+  }
+  
+  if (oldGift.total_count !== newGift.total_count) {
+    changes.total_count = {
+      old: oldGift.total_count,
+      new: newGift.total_count
+    };
+  }
+  
+  if (oldGift.remaining_count !== newGift.remaining_count) {
+    changes.remaining_count = {
+      old: oldGift.remaining_count,
+      new: newGift.remaining_count
+    };
+  }
+  
+  // Проверяем изменения в стикере, если он есть в обоих подарках
+  if (oldGift.sticker && newGift.sticker) {
+    // Проверяем поля стикера
+    const stickerChanges = {};
+    
+    if (oldGift.sticker.emoji !== newGift.sticker.emoji) {
+      stickerChanges.emoji = {
+        old: oldGift.sticker.emoji,
+        new: newGift.sticker.emoji
+      };
+    }
+    
+    if (oldGift.sticker.type !== newGift.sticker.type) {
+      stickerChanges.type = {
+        old: oldGift.sticker.type,
+        new: newGift.sticker.type
+      };
+    }
+    
+    if (oldGift.sticker.is_animated !== newGift.sticker.is_animated) {
+      stickerChanges.is_animated = {
+        old: oldGift.sticker.is_animated,
+        new: newGift.sticker.is_animated
+      };
+    }
+    
+    if (oldGift.sticker.is_video !== newGift.sticker.is_video) {
+      stickerChanges.is_video = {
+        old: oldGift.sticker.is_video,
+        new: newGift.sticker.is_video
+      };
+    }
+    
+    // Если есть изменения в стикере, добавляем их в общий список изменений
+    if (Object.keys(stickerChanges).length > 0) {
+      changes.sticker = stickerChanges;
+    }
+  } else if (oldGift.sticker || newGift.sticker) {
+    // Если стикер есть только в одном из подарков, считаем это изменением
+    changes.sticker = {
+      old: oldGift.sticker ? 'present' : 'absent',
+      new: newGift.sticker ? 'present' : 'absent'
+    };
+  }
+  
+  // Если нет изменений, возвращаем null
+  return Object.keys(changes).length > 0 ? changes : null;
+}
+
+// Функция для форматирования описания изменений в подарке
+function formatGiftChanges(gift, changes) {
+  const emoji = gift.sticker?.emoji || '🎁';
+  let message = `${emoji} *Подарок ID: ${safeMarkdown(gift.id.slice(-8))}*\n`;
+  // Форматируем изменения в основных полях
+  if (changes.star_count) {
+    message += `💫 Стоимость: ${changes.star_count.old || 'не указана'} → ${changes.star_count.new || 'не указана'}\n`;
+  }
+  
+  if (changes.upgrade_star_count) {
+    message += `⭐ Улучшение: ${changes.upgrade_star_count.old || 'не указано'} → ${changes.upgrade_star_count.new || 'не указано'}\n`;
+  }
+  
+  if (changes.total_count) {
+    message += `📊 Всего доступно: ${changes.total_count.old || 'не ограничено'} → ${changes.total_count.new || 'не ограничено'}\n`;
+  }
+  
+  if (changes.remaining_count) {
+    message += `🔄 Осталось: ${changes.remaining_count.old || 'не указано'} → ${changes.remaining_count.new || 'не указано'}\n`;
+    
+    // Расчет процента изменения, если есть данные
+    if (changes.remaining_count.old && changes.remaining_count.new && gift.total_count) {
+      const oldPercent = Math.round((changes.remaining_count.old / gift.total_count) * 100);
+      const newPercent = Math.round((changes.remaining_count.new / gift.total_count) * 100);
+      message += `📈 Доступность: ${oldPercent}% → ${newPercent}%\n`;
     }
   }
+  
+  // Форматируем изменения в стикере
+  if (changes.sticker) {
+    // Если это объект с полями стикера
+    if (typeof changes.sticker === 'object' && changes.sticker.old !== 'present' && changes.sticker.new !== 'present') {
+      message += `\n*Изменения в стикере:*\n`;
+      
+      if (changes.sticker.emoji) {
+        message += `🔣 Эмодзи: ${changes.sticker.emoji.old || 'не указано'} → ${changes.sticker.emoji.new || 'не указано'}\n`;
+      }
+      
+      if (changes.sticker.type) {
+        message += `📋 Тип: ${safeMarkdown(changes.sticker.type.old || 'не указан')} → ${safeMarkdown(changes.sticker.type.new || 'не указан')}\n`;
+      }
+      
+      if (changes.sticker.is_animated !== undefined) {
+        message += `🎬 Анимированный: ${changes.sticker.is_animated.old ? 'Да' : 'Нет'} → ${changes.sticker.is_animated.new ? 'Да' : 'Нет'}\n`;
+      }
+      
+      if (changes.sticker.is_video !== undefined) {
+        message += `📹 Видео: ${changes.sticker.is_video.old ? 'Да' : 'Нет'} → ${changes.sticker.is_video.new ? 'Да' : 'Нет'}\n`;
+      }
+    } else {
+      // Если стикер был добавлен или удален
+      message += `📎 Стикер: ${changes.sticker.old === 'present' ? 'Был' : 'Отсутствовал'} → ${changes.sticker.new === 'present' ? 'Есть' : 'Удален'}\n`;
+    }
+  }
+  
+  return message;
 }
 
 // Функция проверки подарков и отправки уведомлений
@@ -378,11 +520,37 @@ async function checkAndNotify(chatId) {
       // Сортируем подарки перед отображением (редкие первыми)
       const sortedGifts = sortGiftsByRarity(currentGifts);
       
-      // Отправляем информацию о доступных подарках
-      await bot.sendMessage(chatId, 
-        `🎁 *Доступные подарки*\n\nНайдено ${currentGifts.length} подарков.`, 
-        { parse_mode: 'Markdown' }
-      );
+      // Формируем одно сообщение со всей информацией
+      let message = `🎁 *Доступные подарки*\n\nНайдено ${currentGifts.length} подарков.\n\n`;
+      
+      // Добавляем информацию о 5 самых редких подарках
+      if (sortedGifts.length > 0) {
+        message += `*Самые редкие подарки:*\n\n`;
+        
+        // Отображаем информацию о первых 5 (или меньше) подарках
+        const giftsToShow = Math.min(sortedGifts.length, 5);
+        for (let i = 0; i < giftsToShow; i++) {
+          const gift = sortedGifts[i];
+          
+          message += `${i+1}. ${gift.sticker?.emoji || '🎁'} `;
+          message += `*${gift.star_count || 0}⭐*`;
+          
+          if (gift.total_count !== undefined) {
+            message += ` (Лимит: ${gift.total_count})`;
+          }
+          
+          if (gift.remaining_count !== undefined) {
+            message += ` [Осталось: ${gift.remaining_count}]`;
+          }
+          
+          message += `\nID: ${gift.id.slice(-8)}\n\n`;
+        }
+        
+        message += `Для полного списка отправьте /list`;
+      }
+      
+      // Отправляем объединенное сообщение
+      await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
       
       // Создаем файл с детальной информацией о подарках
       let detailedInfo = sortedGifts.map((gift, index) => {
@@ -391,29 +559,6 @@ async function checkAndNotify(chatId) {
       
       fs.writeFileSync(path.join(dataDir, 'telegram-gifts-details.txt'), detailedInfo);
       console.log('Сохранена детальная информация о подарках в файл telegram-gifts-details.txt');
-      
-      // Отправляем информацию о самых редких подарках
-      if (sortedGifts.length > 0) {
-        await bot.sendMessage(chatId, 
-          '🔍 *Подробная информация о доступных подарках (отсортировано по редкости):*', 
-          { parse_mode: 'Markdown' }
-        );
-        
-        // Отправляем информацию о первых 5 (или меньше) подарках
-        const giftsToShow = Math.min(sortedGifts.length, 5);
-        for (let i = 0; i < giftsToShow; i++) {
-          const gift = sortedGifts[i];
-          
-          // Отправляем информацию о подарке
-          await bot.sendMessage(chatId, formatGift(gift), { parse_mode: 'Markdown' });
-          
-          // Отправляем стикер
-          await sendStickerInfo(chatId, gift);
-          
-          // Небольшая задержка между сообщениями
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-      }
       
       return;
     }
@@ -431,155 +576,209 @@ async function checkAndNotify(chatId) {
     const newGifts = findNewGifts(cachedGifts, currentGifts);
     const removedGifts = findRemovedGifts(cachedGifts, currentGifts);
     
-    // Проверяем, изменились ли оставшиеся количества подарков
-    const updatedGifts = currentGifts.filter(currentGift => {
+    // Находим подарки с изменениями в полях
+    const modifiedGifts = [];
+    
+    // Проверяем каждый текущий подарок на наличие изменений
+    for (const currentGift of currentGifts) {
       // Находим соответствующий подарок в кэше
       const cachedGift = cachedGifts.find(cached => cached.id === currentGift.id);
       
-      // Если найден и имеет поле remaining_count, проверяем, изменилось ли оно
-      if (cachedGift && 
-          (currentGift.remaining_count !== undefined || cachedGift.remaining_count !== undefined) &&
-          currentGift.remaining_count !== cachedGift.remaining_count) {
-        return true;
+      // Если подарок найден в кэше, проверяем изменения
+      if (cachedGift) {
+        const changes = findGiftChanges(cachedGift, currentGift);
+        
+        // Если есть изменения, добавляем подарок и информацию об изменениях
+        if (changes) {
+          modifiedGifts.push({
+            gift: currentGift,
+            changes: changes
+          });
+        }
       }
-      
-      return false;
+    }
+    
+    // Сортируем все списки подарков по редкости
+    const sortedNewGifts = sortGiftsByRarity(newGifts);
+    const sortedRemovedGifts = sortGiftsByRarity(removedGifts);
+    const sortedModifiedGifts = sortGiftsByRarity(modifiedGifts.map(item => item.gift)).map(gift => {
+      const modifiedItem = modifiedGifts.find(item => item.gift.id === gift.id);
+      return modifiedItem;
     });
     
     // Обновляем кэш
     saveGiftsCache(currentGifts);
     
     // Если есть изменения в списке подарков
-    if (newGifts.length > 0 || removedGifts.length > 0 || updatedGifts.length > 0) {
-      // Сортируем новые подарки по редкости
-      const sortedNewGifts = sortGiftsByRarity(newGifts);
-      const sortedRemovedGifts = sortGiftsByRarity(removedGifts);
-      const sortedUpdatedGifts = sortGiftsByRarity(updatedGifts);
+    if (sortedNewGifts.length > 0 || sortedRemovedGifts.length > 0 || sortedModifiedGifts.length > 0) {
+      // Формируем ОДНО большое сообщение со всеми изменениями
+      let fullMessage = '🔄 *Изменения в списке подарков*\n\n';
       
-      // Составляем текст уведомления
-      let summary = '🔄 *Изменения в списке подарков*\n\n';
-      
+      // Добавляем сводку изменений
       if (sortedNewGifts.length > 0) {
-        summary += `✅ *Добавлено ${sortedNewGifts.length} новых подарков:*\n`;
-        
-        // Добавляем краткую информацию о каждом новом подарке
+        fullMessage += `✅ *Добавлено ${sortedNewGifts.length} новых подарков:*\n`;
         for (let i = 0; i < sortedNewGifts.length; i++) {
-          summary += formatGiftSummary(sortedNewGifts[i], i+1) + '\n';
+          fullMessage += formatGiftSummary(sortedNewGifts[i], i+1) + '\n';
         }
-        
-        summary += '\n';
+        fullMessage += '\n';
       }
       
       if (sortedRemovedGifts.length > 0) {
-        summary += `❌ *Удалено ${sortedRemovedGifts.length} подарков:*\n`;
-        
-        // Добавляем краткую информацию о каждом удаленном подарке
+        fullMessage += `❌ *Удалено ${sortedRemovedGifts.length} подарков:*\n`;
         for (let i = 0; i < sortedRemovedGifts.length; i++) {
-          summary += formatGiftSummary(sortedRemovedGifts[i], i+1) + '\n';
+          fullMessage += formatGiftSummary(sortedRemovedGifts[i], i+1) + '\n';
         }
-        
-        summary += '\n';
+        fullMessage += '\n';
       }
       
-      if (sortedUpdatedGifts.length > 0) {
-        summary += `📊 *Обновлено ${sortedUpdatedGifts.length} подарков:*\n`;
-        
-        // Добавляем информацию об изменении количества для каждого обновленного подарка
-        for (let i = 0; i < sortedUpdatedGifts.length; i++) {
-          const currentGift = sortedUpdatedGifts[i];
-          const cachedGift = cachedGifts.find(cached => cached.id === currentGift.id);
+      if (sortedModifiedGifts.length > 0) {
+        fullMessage += `📝 *Изменено ${sortedModifiedGifts.length} подарков:*\n`;
+        for (let i = 0; i < sortedModifiedGifts.length; i++) {
+          const { gift, changes } = sortedModifiedGifts[i];
+          const emoji = gift.sticker?.emoji || '🎁';
           
-          const emoji = currentGift.sticker?.emoji || '🎁';
-          const oldRemaining = cachedGift?.remaining_count ?? 'N/A';
-          const newRemaining = currentGift.remaining_count ?? 'N/A';
-          
-          summary += `${emoji} ${safeMarkdown(`${i+1}. ID: ${currentGift.id.slice(-6)}`)}`;
-          summary += safeMarkdown(` [${oldRemaining} → ${newRemaining}]`);
-          
-          if (currentGift.total_count !== undefined) {
-            const percentRemaining = Math.round((currentGift.remaining_count / currentGift.total_count) * 100);
-            summary += safeMarkdown(` (${percentRemaining}% осталось)`);
+          let changeDesc = `${emoji} ${safeMarkdown(`${i+1}. ID: ${gift.id.slice(-8)}`)}`;
+          const changeFields = Object.keys(changes);
+          if (changeFields.length > 0) {
+            changeDesc += safeMarkdown(` (изменения: ${changeFields.join(', ')})`);
           }
           
-          summary += '\n';
+          fullMessage += changeDesc + '\n';
         }
-        
-        summary += '\n';
+        fullMessage += '\n';
       }
       
-      // Отправляем общее уведомление об изменениях
-      await bot.sendMessage(chatId, summary, { parse_mode: 'Markdown' });
-      
-      // Отправляем подробную информацию о каждом новом подарке
+      // Добавляем детальную информацию о новых подарках
       if (sortedNewGifts.length > 0) {
-        await bot.sendMessage(chatId, 
-          '📦 *Подробная информация о новых подарках:*', 
-          { parse_mode: 'Markdown' }
-        );
+        fullMessage += `📦 *Подробная информация о новых подарках:*\n\n`;
         
         for (const gift of sortedNewGifts) {
-          // Отправляем информацию о подарке
-          await bot.sendMessage(chatId, formatGift(gift), { parse_mode: 'Markdown' });
-          
-          // Отправляем стикер
-          await sendStickerInfo(chatId, gift);
-          
-          // Небольшая задержка между сообщениями
-          await new Promise(resolve => setTimeout(resolve, 300));
+          fullMessage += formatGift(gift) + '\n\n';
         }
       }
       
-      // Отправляем информацию об удаленных подарках, если они есть
+      // Добавляем информацию об удаленных подарках
       if (sortedRemovedGifts.length > 0) {
-        await bot.sendMessage(chatId, 
-          '🗑️ *Информация об удаленных подарках:*', 
-          { parse_mode: 'Markdown' }
-        );
+        fullMessage += `🗑️ *Информация об удаленных подарках:*\n\n`;
         
         for (const gift of sortedRemovedGifts) {
-          // Отправляем информацию об удаленном подарке
-          await bot.sendMessage(chatId, formatGift(gift), { parse_mode: 'Markdown' });
-          
-          // Небольшая задержка между сообщениями
-          await new Promise(resolve => setTimeout(resolve, 300));
+          fullMessage += formatGift(gift) + '\n\n';
         }
       }
       
-      // Отправляем информацию об обновленных подарках с изменившимся количеством
-      if (sortedUpdatedGifts.length > 0) {
-        await bot.sendMessage(chatId, 
-          '📈 *Информация об обновленных подарках:*', 
-          { parse_mode: 'Markdown' }
-        );
+      // Добавляем информацию об измененных подарках
+      if (sortedModifiedGifts.length > 0) {
+        fullMessage += `✏️ *Подробная информация об измененных подарках:*\n\n`;
         
-        for (const gift of sortedUpdatedGifts) {
-          const cachedGift = cachedGifts.find(cached => cached.id === gift.id);
+        for (const { gift, changes } of sortedModifiedGifts) {
+          fullMessage += formatGiftChanges(gift, changes) + '\n\n';
+        }
+      }
+      
+      // Проверяем размер сообщения и разбиваем на части при необходимости
+      // Telegram имеет лимит примерно 4096 символов на сообщение
+      const MAX_MESSAGE_LENGTH = 4000; // Оставляем небольшой запас
+      
+      if (fullMessage.length <= MAX_MESSAGE_LENGTH) {
+        // Если сообщение помещается в один блок, отправляем его
+        await bot.sendMessage(chatId, fullMessage, { parse_mode: 'Markdown' });
+      } else {
+        // Разбиваем на части
+        console.log(`Сообщение слишком длинное (${fullMessage.length} символов), разбиваем на части`);
+        
+        // Сначала отправляем сводку изменений
+        let summaryMessage = '🔄 *Изменения в списке подарков*\n\n';
+        
+        if (sortedNewGifts.length > 0) {
+          summaryMessage += `✅ *Добавлено ${sortedNewGifts.length} новых подарков*\n`;
+        }
+        
+        if (sortedRemovedGifts.length > 0) {
+          summaryMessage += `❌ *Удалено ${sortedRemovedGifts.length} подарков*\n`;
+        }
+        
+        if (sortedModifiedGifts.length > 0) {
+          summaryMessage += `📝 *Изменено ${sortedModifiedGifts.length} подарков*\n`;
+        }
+        
+        await bot.sendMessage(chatId, summaryMessage, { parse_mode: 'Markdown' });
+        
+        // Затем отправляем подробные сообщения, максимально группируя их
+        // Новые подарки
+        if (sortedNewGifts.length > 0) {
+          let newGiftsMessage = `📦 *Подробная информация о новых подарках:*\n\n`;
           
-          // Формируем специальное сообщение с информацией об изменении
-          let updateMsg = formatGift(gift);
-          
-          if (cachedGift && cachedGift.remaining_count !== undefined) {
-            const change = gift.remaining_count - cachedGift.remaining_count;
-            const changeSymbol = change > 0 ? '📈' : '📉';
-            const changeText = change > 0 ? `увеличилось на ${change}` : `уменьшилось на ${Math.abs(change)}`;
+          for (const gift of sortedNewGifts) {
+            const giftInfo = formatGift(gift) + '\n\n';
             
-            updateMsg += `\n${changeSymbol} *Количество ${changeText}*\n`;
-            updateMsg += `${safeMarkdown(`Было: ${cachedGift.remaining_count}, стало: ${gift.remaining_count}`)}`;
+            // Если добавление этого подарка превысит лимит, отправляем текущее сообщение и начинаем новое
+            if (newGiftsMessage.length + giftInfo.length > MAX_MESSAGE_LENGTH) {
+              await bot.sendMessage(chatId, newGiftsMessage, { parse_mode: 'Markdown' });
+              newGiftsMessage = giftInfo;
+            } else {
+              newGiftsMessage += giftInfo;
+            }
           }
           
-          // Отправляем информацию об обновленном подарке
-          await bot.sendMessage(chatId, updateMsg, { parse_mode: 'Markdown' });
+          // Отправляем оставшуюся информацию о новых подарках
+          if (newGiftsMessage.length > 0) {
+            await bot.sendMessage(chatId, newGiftsMessage, { parse_mode: 'Markdown' });
+          }
+        }
+        
+        // Удаленные подарки
+        if (sortedRemovedGifts.length > 0) {
+          let removedGiftsMessage = `🗑️ *Информация об удаленных подарках:*\n\n`;
           
-          // Небольшая задержка между сообщениями
-          await new Promise(resolve => setTimeout(resolve, 300));
+          for (const gift of sortedRemovedGifts) {
+            const giftInfo = formatGift(gift) + '\n\n';
+            
+            if (removedGiftsMessage.length + giftInfo.length > MAX_MESSAGE_LENGTH) {
+              await bot.sendMessage(chatId, removedGiftsMessage, { parse_mode: 'Markdown' });
+              removedGiftsMessage = giftInfo;
+            } else {
+              removedGiftsMessage += giftInfo;
+            }
+          }
+          
+          if (removedGiftsMessage.length > 0) {
+            await bot.sendMessage(chatId, removedGiftsMessage, { parse_mode: 'Markdown' });
+          }
+        }
+        
+        // Измененные подарки
+        if (sortedModifiedGifts.length > 0) {
+          let modifiedGiftsMessage = `✏️ *Подробная информация об измененных подарках:*\n\n`;
+          
+          for (const { gift, changes } of sortedModifiedGifts) {
+            const giftInfo = formatGiftChanges(gift, changes) + '\n\n';
+            
+            if (modifiedGiftsMessage.length + giftInfo.length > MAX_MESSAGE_LENGTH) {
+              await bot.sendMessage(chatId, modifiedGiftsMessage, { parse_mode: 'Markdown' });
+              modifiedGiftsMessage = giftInfo;
+            } else {
+              modifiedGiftsMessage += giftInfo;
+            }
+          }
+          
+          if (modifiedGiftsMessage.length > 0) {
+            await bot.sendMessage(chatId, modifiedGiftsMessage, { parse_mode: 'Markdown' });
+          }
         }
       }
       
-      // Дополнительно отправляем команду для проверки всех доступных подарков
-      await bot.sendMessage(chatId, 
-        '🔍 *Хотите увидеть полный список доступных подарков?*\n\nОтправьте команду /list для просмотра всех подарков, отсортированных по редкости.', 
-        { parse_mode: 'Markdown' }
-      );
+      // Отправляем самые важные стикеры отдельно (только для новых подарков и только первые несколько)
+      const MAX_STICKERS_TO_SEND = 3;
+      if (sortedNewGifts.length > 0) {
+        const stickersToSend = Math.min(sortedNewGifts.length, MAX_STICKERS_TO_SEND);
+        
+        for (let i = 0; i < stickersToSend; i++) {
+          const gift = sortedNewGifts[i];
+          await sendStickerInfo(chatId, gift);
+          // Небольшая задержка между стикерами
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
     } else {
       console.log('Изменений в списке подарков не обнаружено');
     }
