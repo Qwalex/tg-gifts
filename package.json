@@ -1,0 +1,14 @@
+{
+  "name": "telegram-gifts-fetcher",
+  "version": "1.0.0",
+  "description": "Скрипт для получения списка доступных подарков в Telegram",
+  "main": "telegram-gifts.js",
+  "scripts": {
+    "start": "node telegram-gifts.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.63.0",
+    "node-fetch": "^3.3.2"
+  },
+  "type": "module"
+} 
