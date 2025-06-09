@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.git
+.gitignore
+.env
+*.md
+.DS_Store
+
+# Исключаем локальные данные из образа (будут монтироваться как volume)
+chat-id.json
+gifts-cache.json
+gifts-cache-history-*.json 
