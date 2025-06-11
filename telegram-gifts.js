@@ -8,6 +8,7 @@ const token = '7222760906:AAHOv-zgIAngYZAJFnAK7WZ3MJWXpd8UWAk';
 
 // Папка для хранения данных (в контейнере это будет примонтированный volume)
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+console.log(`Используем директорию для данных: ${dataDir}`);
 
 // Создаем директорию для данных, если она не существует
 if (!fs.existsSync(dataDir)) {

@@ -7,8 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: telegram-gifts-bot
     restart: unless-stopped
-    volumes:
-      - ./data:/app/data
     environment:
       - NODE_ENV=production
-      - TZ=Europe/Moscow  # Настройте часовой пояс по вашему усмотрению 
+      - TZ=Europe/Moscow  # Настройте часовой пояс по вашему усмотрению
+      - DATA_DIR=/app/data  # Явно указываем путь к директории данных 
