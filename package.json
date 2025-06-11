@@ -1,5 +1,5 @@
 {
-  "name": "telegram-gifts-fetcher",
+  "name": "tg-gifts",
   "version": "1.0.0",
   "description": "Скрипт для получения списка доступных подарков в Telegram",
   "main": "telegram-gifts.js",
