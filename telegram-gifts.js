@@ -314,7 +314,7 @@ function generateDetailedInfo(gift) {
 async function getAvailableGifts() {
   try {
     // Делаем запрос к API
-    const response = await fetch(`https://api.telegram.org/bot${token}/getAvailableGifts`);
+    const response = await fetch(`https://api.telegram.org/bot${token}/getAvailableGifts?ver=${Date.now()}`);
     
     if (!response.ok) {
       throw new Error(`HTTP ошибка: ${response.status}`);
