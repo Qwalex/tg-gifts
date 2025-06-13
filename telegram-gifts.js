@@ -2,9 +2,14 @@ import TelegramBot from 'node-telegram-bot-api';
 import fs from 'fs';
 import fetch from 'node-fetch';
 import path from 'path';
+import { callToPhones } from './call.js';
+
+const isProd = process.env.IS_DEV !== 'true';
 
 // Токен бота
-const token = '7222760906:AAHOv-zgIAngYZAJFnAK7WZ3MJWXpd8UWAk';
+const token = isProd ? '7222760906:AAHOv-zgIAngYZAJFnAK7WZ3MJWXpd8UWAk' : '7729975495:AAH-Wqczd1XySahsmPFrAQRXauqyzHXltVk'; // prod
+
+console.log(`isProd: ${isProd}`);
 
 // Папка для хранения данных (в контейнере это будет примонтированный volume)
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -22,7 +27,7 @@ if (!fs.existsSync(dataDir)) {
 }
 
 // Файлы для хранения данных
-const chatIdFile = path.join(dataDir, 'chat-ids.json');
+const chatIdFile = path.join(dataDir, isProd ? 'chat-ids.json' : 'chat-ids-test.json');
 const cacheFile = path.join(dataDir, 'gifts-cache.json');
 
 // Интервал проверки (в миллисекундах): 10 секунд = 10000 мс
@@ -33,6 +38,17 @@ const bot = new TelegramBot(token, { polling: false });
 
 // Флаг для отслеживания статуса polling
 let pollingActive = false;
+// Флаг для отслеживания процесса перезапуска
+let isReconnecting = false;
+// Счетчик попыток переподключения
+let reconnectAttempts = 0;
+// Максимальное количество попыток переподключения
+const MAX_RECONNECT_ATTEMPTS = 10;
+// Время ожидания между попытками (в мс): начинаем с 5 секунд, увеличиваем с каждой попыткой
+const RECONNECT_DELAY = 5000;
+
+// Создаем объект для хранения таймеров повторной отправки уведомлений
+const notificationTimers = new Map();
 
 // Функция для безопасного запуска polling
 async function startPolling() {
@@ -41,13 +57,67 @@ async function startPolling() {
     return;
   }
   
+  if (isReconnecting) {
+    console.log('Уже выполняется переподключение, пропускаем запуск');
+    return;
+  }
+  
   try {
     console.log('Запускаем режим polling');
     await bot.startPolling({polling: true});
     pollingActive = true;
+    isReconnecting = false;
+    reconnectAttempts = 0; // Сбрасываем счетчик попыток при успешном подключении
+    console.log('Polling успешно запущен');
   } catch (error) {
     console.error('Ошибка при запуске polling:', error.message);
+    pollingActive = false;
+    
+    // Если это не попытка переподключения, начинаем процесс переподключения
+    if (!isReconnecting) {
+      scheduleReconnect();
+    }
   }
+}
+
+// Функция для планирования переподключения
+function scheduleReconnect() {
+  if (isReconnecting) {
+    console.log('Переподключение уже запланировано');
+    return;
+  }
+  
+  isReconnecting = true;
+  reconnectAttempts++;
+  
+  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+    console.error(`Превышено максимальное количество попыток переподключения (${MAX_RECONNECT_ATTEMPTS}). Останавливаем попытки.`);
+    isReconnecting = false;
+    return;
+  }
+  
+  // Увеличиваем задержку с каждой попыткой (до максимума в 30 секунд)
+  const delay = Math.min(RECONNECT_DELAY * reconnectAttempts, 30000);
+  
+  console.log(`Планируем переподключение (попытка ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) через ${delay/1000} секунд...`);
+  
+  setTimeout(async () => {
+    console.log(`Выполняем попытку переподключения ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+    
+    try {
+      // Сначала убедимся, что polling остановлен
+      await stopPolling();
+      
+      // Затем пробуем запустить заново
+      await startPolling();
+    } catch (error) {
+      console.error(`Ошибка при переподключении (попытка ${reconnectAttempts}):`, error.message);
+      
+      // Если не удалось переподключиться, планируем следующую попытку
+      isReconnecting = false;
+      scheduleReconnect();
+    }
+  }, delay);
 }
 
 // Функция для безопасной остановки polling
@@ -61,8 +131,11 @@ async function stopPolling() {
     console.log('Останавливаем режим polling');
     await bot.stopPolling();
     pollingActive = false;
+    console.log('Polling успешно остановлен');
   } catch (error) {
     console.error('Ошибка при остановке polling:', error.message);
+    // Сбрасываем флаг даже при ошибке, чтобы позволить повторную попытку
+    pollingActive = false;
   }
 }
 
@@ -399,9 +472,9 @@ async function sendStickerInfo(chatId, gift) {
     if (gift.sticker.type === 'custom_emoji') {
       // Для emoji-стикеров просто отправляем эмодзи в текстовом сообщении
       await bot.sendMessage(chatId, 
-        `${gift.sticker.emoji} *Эмодзи-стикер (${gift.star_count} звезд)*\n\n` +
-        `Тип: ${gift.sticker.type}\n` +
-        `ID: ${gift.id.slice(-8)}`, 
+        `${gift.sticker.emoji} *Эмодзи-стикер (${safeMarkdown(gift.star_count)} звезд)*\n\n` +
+        `Тип: ${safeMarkdown(gift.sticker.type)}\n` +
+        `ID: ${safeMarkdown(gift.id.slice(-8))}`, 
         { parse_mode: 'Markdown' }
       );
       console.log(`Отправлен emoji-стикер ${gift.sticker.emoji} для пользователя ${chatId}`);
@@ -417,8 +490,8 @@ async function sendStickerInfo(chatId, gift) {
       // Отправляем текстовую информацию о стикере
       await bot.sendMessage(chatId, 
         `🖼️ *Информация о стикере:*\n` +
-        `${gift.sticker.emoji || '🎁'} Тип: ${gift.sticker.type || 'неизвестно'}\n` +
-        `ID подарка: ${gift.id.slice(-8)}`, 
+        `${gift.sticker.emoji || '🎁'} Тип: ${safeMarkdown(gift.sticker.type || 'неизвестно')}\n` +
+        `ID подарка: ${safeMarkdown(gift.id.slice(-8))}`, 
         { parse_mode: 'Markdown' }
       );
     }
@@ -427,16 +500,27 @@ async function sendStickerInfo(chatId, gift) {
     
     // Если не удалось отправить стикер, отправляем только текстовую информацию
     try {
+      // Используем HTML форматирование вместо Markdown для надежности
       await bot.sendMessage(chatId, 
-        `🖼️ *Информация о стикере:*\n` +
-        `${gift.sticker.emoji || '🎁'} Тип: ${gift.sticker.type || 'неизвестно'}\n` +
-        `Анимированный: ${gift.sticker.is_animated ? 'Да' : 'Нет'}\n` +
-        `Видео: ${gift.sticker.is_video ? 'Да' : 'Нет'}\n` +
+        `🖼️ <b>Информация о стикере:</b>\n` +
+        `${gift.sticker?.emoji || '🎁'} Тип: ${gift.sticker?.type || 'неизвестно'}\n` +
+        `Анимированный: ${gift.sticker?.is_animated ? 'Да' : 'Нет'}\n` +
+        `Видео: ${gift.sticker?.is_video ? 'Да' : 'Нет'}\n` +
         `ID подарка: ${gift.id.slice(-8)}`, 
-        { parse_mode: 'Markdown' }
+        { parse_mode: 'HTML' }
       );
     } catch (msgError) {
       console.error('Ошибка при отправке информации о стикере:', msgError.message);
+      // Пробуем отправить без форматирования как последний вариант
+      try {
+        await bot.sendMessage(chatId, 
+          `Информация о стикере:\n` +
+          `${gift.sticker?.emoji || '🎁'} Тип: ${gift.sticker?.type || 'неизвестно'}\n` +
+          `ID подарка: ${gift.id.slice(-8)}`
+        );
+      } catch (plainError) {
+        console.error('Критическая ошибка при отправке сообщения:', plainError.message);
+      }
     }
   }
 }
@@ -583,6 +667,69 @@ function formatGiftChanges(gift, changes) {
   return message;
 }
 
+// Функция для остановки таймера повторной отправки уведомлений
+function stopNotificationTimer(userId, messageId) {
+  const key = `${userId}_${messageId}`;
+  if (notificationTimers.has(key)) {
+    clearInterval(notificationTimers.get(key));
+    notificationTimers.delete(key);
+    console.log(`Остановлен таймер уведомлений для пользователя ${userId}, сообщение ${messageId}`);
+  }
+}
+
+// Функция для создания клавиатуры с кнопками команд
+function getMainKeyboard() {
+  return {
+    reply_markup: {
+      keyboard: [
+        [{ text: '📋 Список подарков' }, { text: '🔍 Подробности' }],
+        [{ text: '❌ Отписаться' }, { text: '❓ Помощь' }]
+      ],
+      resize_keyboard: true
+    }
+  };
+}
+
+// Функция для создания клавиатуры с кнопкой "Прочитано"
+function getKeyboardWithReadButton() {
+  return {
+    reply_markup: {
+      keyboard: [
+        [{ text: '📋 Список подарков' }, { text: '🔍 Подробности' }],
+        [{ text: '✅ Прочитано' }],
+        [{ text: '❌ Отписаться' }, { text: '❓ Помощь' }]
+      ],
+      resize_keyboard: true
+    }
+  };
+}
+
+// Функция для остановки всех таймеров уведомлений для конкретного пользователя
+function stopAllNotificationTimers(userId) {
+  console.log(`Попытка остановить все таймеры для пользователя ${userId}`);
+  
+  // Ищем все таймеры для данного пользователя
+  let found = false;
+  
+  for (const [key, timerId] of notificationTimers.entries()) {
+    if (key.startsWith(`${userId}_`)) {
+      console.log(`Найден таймер: ${key}, останавливаем...`);
+      clearInterval(timerId);
+      notificationTimers.delete(key);
+      found = true;
+      console.log(`Остановлен таймер уведомлений для пользователя ${userId}, ключ ${key}`);
+    }
+  }
+  
+  if (!found) {
+    console.log(`Для пользователя ${userId} не найдено активных таймеров`);
+  } else {
+    console.log(`Для пользователя ${userId} остановлены все таймеры уведомлений`);
+  }
+  
+  return found;
+}
+
 // Функция проверки подарков и отправки уведомлений всем пользователям
 async function checkAndNotifyAll() {
   try {
@@ -675,6 +822,11 @@ async function checkAndNotifyAll() {
     // Находим новые и удаленные подарки
     const newGifts = findNewGifts(cachedGifts, currentGifts);
     const removedGifts = findRemovedGifts(cachedGifts, currentGifts);
+
+    if (newGifts.length > 0) {
+      console.log('Обнаружены новые подарки. Начинаем обзвон... %c', 'color: green; font-weight: bold;');
+      callToPhones();
+    }
     
     // Находим подарки с изменениями в полях
     const modifiedGifts = [];
@@ -782,12 +934,44 @@ async function checkAndNotifyAll() {
       // Отправляем уведомления всем подписанным пользователям
       for (const chatId of chatIds) {
         try {
+          // Если есть новые подарки, добавляем кнопку "Прочитано" в клавиатуру
+          const keyboard = sortedNewGifts.length > 0 ? getKeyboardWithReadButton() : getMainKeyboard();
+          
           if (fullMessage.length <= MAX_MESSAGE_LENGTH) {
             // Если сообщение помещается в один блок, отправляем его
             await bot.sendMessage(chatId, fullMessage, { 
               parse_mode: 'Markdown',
-              ...getMainKeyboard()
+              ...keyboard
             });
+            
+            // Запускаем таймер повторной отправки для новых подарков
+            if (sortedNewGifts.length > 0) {
+              // Останавливаем предыдущие таймеры, если они есть
+              stopAllNotificationTimers(chatId);
+              
+              const timerId = setInterval(async () => {
+                try {
+                  await bot.sendMessage(chatId, fullMessage, { 
+                    parse_mode: 'Markdown',
+                    ...keyboard
+                  });
+                  console.log(`Повторная отправка уведомления о новых подарках пользователю ${chatId}`);
+                } catch (error) {
+                  console.error(`Ошибка при повторной отправке уведомления: ${error.message}`);
+                  // Если возникла ошибка, останавливаем таймер
+                  if (notificationTimers.has(`${chatId}_new_gifts`)) {
+                    clearInterval(notificationTimers.get(`${chatId}_new_gifts`));
+                    notificationTimers.delete(`${chatId}_new_gifts`);
+                    console.log(`Остановлен таймер из-за ошибки для пользователя ${chatId}`);
+                  }
+                }
+              }, 2000); // Повторять каждую секунду
+              
+              // Сохраняем таймер
+              notificationTimers.set(`${chatId}_new_gifts`, timerId);
+              console.log(`Запущен таймер повторных уведомлений для пользователя ${chatId}, ID: ${timerId}`);
+            }
+            
             console.log(`Отправлено уведомление об изменениях пользователю ${chatId}`);
           } else {
             // Разбиваем на части
@@ -810,8 +994,36 @@ async function checkAndNotifyAll() {
             
             await bot.sendMessage(chatId, summaryMessage, { 
               parse_mode: 'Markdown',
-              ...getMainKeyboard()
+              ...keyboard
             });
+            
+            // Запускаем таймер повторной отправки
+            if (sortedNewGifts.length > 0) {
+              // Останавливаем предыдущие таймеры, если они есть
+              stopAllNotificationTimers(chatId);
+              
+              const timerId = setInterval(async () => {
+                try {
+                  await bot.sendMessage(chatId, summaryMessage, { 
+                    parse_mode: 'Markdown',
+                    ...keyboard
+                  });
+                  console.log(`Повторная отправка сводки о новых подарках пользователю ${chatId}`);
+                } catch (error) {
+                  console.error(`Ошибка при повторной отправке сводки: ${error.message}`);
+                  // Если возникла ошибка, останавливаем таймер
+                  if (notificationTimers.has(`${chatId}_new_gifts`)) {
+                    clearInterval(notificationTimers.get(`${chatId}_new_gifts`));
+                    notificationTimers.delete(`${chatId}_new_gifts`);
+                    console.log(`Остановлен таймер из-за ошибки для пользователя ${chatId}`);
+                  }
+                }
+              }, 1000); // Повторять каждую секунду
+              
+              // Сохраняем таймер
+              notificationTimers.set(`${chatId}_new_gifts`, timerId);
+              console.log(`Запущен таймер повторных уведомлений для пользователя ${chatId}, ID: ${timerId}`);
+            }
             
             // Затем отправляем подробные сообщения, максимально группируя их
             // Новые подарки
@@ -988,19 +1200,6 @@ async function startMonitoring() {
   }
 }
 
-// Функция для создания клавиатуры с кнопками команд
-function getMainKeyboard() {
-  return {
-    reply_markup: {
-      keyboard: [
-        [{ text: '📋 Список подарков' }, { text: '🔍 Подробности' }],
-        [{ text: '❌ Отписаться' }, { text: '❓ Помощь' }]
-      ],
-      resize_keyboard: true
-    }
-  };
-}
-
 // Функция для настройки обработчиков событий бота
 function setupBotEventHandlers() {
   console.log('Настройка обработчиков событий бота');
@@ -1133,6 +1332,8 @@ function setupBotEventHandlers() {
       const chatIds = loadChatIds();
       const text = msg.text.trim();
       
+      console.log(`Получено сообщение от пользователя ${receivedChatId}: "${text}"`);
+      
       // Обрабатываем только сообщения от подписанных пользователей
       if (!chatIds.includes(receivedChatId)) {
         if (text !== '/start') {
@@ -1164,6 +1365,39 @@ function setupBotEventHandlers() {
           // Аналогично команде /help
           await handleHelpCommand(receivedChatId);
           break;
+          
+        case '✅ Прочитано':
+          console.log(`Пользователь ${receivedChatId} нажал кнопку "Прочитано"`);
+          
+          // Останавливаем все таймеры уведомлений для этого пользователя
+          const stopped = stopAllNotificationTimers(receivedChatId);
+          
+          // Отправляем подтверждение
+          if (stopped) {
+            await bot.sendMessage(receivedChatId, 
+              '✅ *Уведомления остановлены*\n\nВы больше не будете получать повторные сообщения о новых подарках.', 
+              { 
+                parse_mode: 'Markdown',
+                ...getMainKeyboard() // Возвращаем обычную клавиатуру без кнопки "Прочитано"
+              }
+            );
+          } else {
+            await bot.sendMessage(receivedChatId, 
+              '✅ *Уведомление отмечено как прочитанное*\n\nАктивных уведомлений не найдено.', 
+              { 
+                parse_mode: 'Markdown',
+                ...getMainKeyboard() // Возвращаем обычную клавиатуру без кнопки "Прочитано"
+              }
+            );
+          }
+          
+          console.log(`Пользователь ${receivedChatId} отметил уведомления как прочитанные`);
+          break;
+          
+        default:
+          // Если сообщение не соответствует ни одной команде, просто игнорируем
+          console.log(`Получено неизвестное сообщение от пользователя ${receivedChatId}: "${text}"`);
+          break;
       }
     } catch (error) {
       console.error('Ошибка при обработке сообщения:', error.message);
@@ -1194,22 +1428,30 @@ function setupBotEventHandlers() {
   bot.on('polling_error', (error) => {
     console.error('Ошибка polling:', error.message);
     
-    // Если ошибка связана с конфликтом экземпляров бота, перезапускаем polling
-    if (error.message.includes('409 Conflict') || error.message.includes('terminated by other getUpdates request')) {
-      console.log('Обнаружен конфликт polling, пробуем перезапустить через 5 секунд...');
+    // Если ошибка связана с конфликтом экземпляров бота или другими проблемами соединения
+    if (error.message.includes('409 Conflict') || 
+        error.message.includes('terminated by other getUpdates request') ||
+        error.message.includes('ETIMEDOUT') ||
+        error.message.includes('ECONNRESET') ||
+        error.message.includes('ECONNREFUSED') ||
+        error.message.includes('ENOTFOUND')) {
       
-      // Останавливаем polling
-      stopPolling().then(() => {
-        // Задержка перед перезапуском
-        setTimeout(() => {
-          console.log('Пробуем перезапустить polling после конфликта');
-          startPolling().catch(error => {
-            console.error('Ошибка при перезапуске polling:', error.message);
-          });
-        }, 5000);
-      }).catch(error => {
-        console.error('Ошибка при остановке polling:', error.message);
-      });
+      console.log('Обнаружена проблема с соединением, запускаем процедуру переподключения...');
+      
+      // Если polling активен, останавливаем его перед переподключением
+      if (pollingActive) {
+        stopPolling().then(() => {
+          isReconnecting = false; // Сбрасываем флаг, чтобы scheduleReconnect мог начать процесс
+          scheduleReconnect();
+        }).catch(error => {
+          console.error('Ошибка при остановке polling:', error.message);
+          isReconnecting = false;
+          scheduleReconnect();
+        });
+      } else {
+        isReconnecting = false; // Сбрасываем флаг, чтобы scheduleReconnect мог начать процесс
+        scheduleReconnect();
+      }
     }
   });
 }
@@ -1385,6 +1627,13 @@ async function gracefulShutdown(signal) {
   console.log(`Получен сигнал ${signal}, завершаем работу...`);
   
   try {
+    // Останавливаем все таймеры уведомлений
+    for (const [key, timerId] of notificationTimers.entries()) {
+      clearInterval(timerId);
+      console.log(`Остановлен таймер уведомлений: ${key}`);
+    }
+    notificationTimers.clear();
+    
     const chatIds = loadChatIds();
     if (chatIds.length > 0) {
       // Отправляем уведомление всем пользователям

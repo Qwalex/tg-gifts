@@ -4,11 +4,16 @@
   "description": "Скрипт для получения списка доступных подарков в Telegram",
   "main": "telegram-gifts.js",
   "scripts": {
-    "start": "node telegram-gifts.js"
+    "start": "node telegram-gifts.js",
+    "start:dev": "cross-env IS_DEV=true node telegram-gifts.js"
   },
   "dependencies": {
-    "node-telegram-bot-api": "^0.63.0",
-    "node-fetch": "^3.3.2"
+    "dotenv": "^16.5.0",
+    "node-fetch": "^3.3.2",
+    "node-telegram-bot-api": "^0.63.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3"
   },
   "type": "module"
-} 
+}
