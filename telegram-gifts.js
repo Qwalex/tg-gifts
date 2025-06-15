@@ -50,6 +50,10 @@ const RECONNECT_DELAY = 5000;
 // Создаем объект для хранения таймеров повторной отправки уведомлений
 const notificationTimers = new Map();
 
+// Переменные для отслеживания
+const MAX_DATA_AGE_MS = 5 * 60 * 1000; // 5 минут в миллисекундах
+let staleDateAlertSent = false; // Флаг, был ли отправлен алерт о неактуальности данных
+
 // Функция для безопасного запуска polling
 async function startPolling() {
   if (pollingActive) {
@@ -189,8 +193,21 @@ function loadChatIds() {
 // Функция для сохранения кэша подарков
 function saveGiftsCache(gifts) {
   try {
-    fs.writeFileSync(cacheFile, JSON.stringify(gifts, null, 2));
-    console.log(`Кэш подарков обновлен (${gifts.length} подарков)`);
+    // Добавляем информацию о дате обновления в кэш
+    const cacheData = {
+      gifts: gifts,
+      lastUpdated: new Date().toISOString()
+    };
+    
+    fs.writeFileSync(cacheFile, JSON.stringify(cacheData, null, 2));
+    console.log(`Кэш подарков обновлен (${gifts.length} подарков) в ${new Date().toLocaleString()}`);
+    
+    // Сбрасываем флаг предупреждения при успешном обновлении
+    if (staleDateAlertSent) {
+      console.log('Данные успешно обновлены, сбрасываем флаг предупреждения');
+      staleDateAlertSent = false;
+    }
+    
     return true;
   } catch (error) {
     console.error(`Ошибка при сохранении кэша: ${error.message}`);
@@ -202,14 +219,39 @@ function saveGiftsCache(gifts) {
 function loadGiftsCache() {
   try {
     if (fs.existsSync(cacheFile)) {
-      const data = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-      console.log(`Загружен кэш с ${data.length} подарками`);
-      return data;
+      const fileData = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      
+      // Проверяем новый формат с полем gifts
+      if (fileData && fileData.gifts && Array.isArray(fileData.gifts)) {
+        console.log(`Загружен кэш с ${fileData.gifts.length} подарками. Последнее обновление: ${new Date(fileData.lastUpdated).toLocaleString()}`);
+        return fileData.gifts;
+      } 
+      // Поддержка старого формата (обратная совместимость)
+      else if (Array.isArray(fileData)) {
+        console.log(`Загружен кэш в старом формате с ${fileData.length} подарками`);
+        return fileData;
+      }
     }
   } catch (error) {
     console.error(`Ошибка при загрузке кэша: ${error.message}`);
   }
   return [];
+}
+
+// Функция для получения даты последнего обновления кэша
+function getLastUpdateTime() {
+  try {
+    if (fs.existsSync(cacheFile)) {
+      const fileData = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      
+      if (fileData && fileData.lastUpdated) {
+        return new Date(fileData.lastUpdated);
+      }
+    }
+  } catch (error) {
+    console.error(`Ошибка при получении времени обновления кэша: ${error.message}`);
+  }
+  return null;
 }
 
 // Функция для сохранения истории кэша подарков
@@ -804,7 +846,10 @@ async function checkAndNotifyAll() {
         return `=== Подарок #${index + 1} ===\n${generateDetailedInfo(gift)}\n`;
       }).join('\n');
       
-      fs.writeFileSync(path.join(dataDir, 'telegram-gifts-details.txt'), detailedInfo);
+      const lastUpdate = getLastUpdateTime();
+      const updateTimeString = lastUpdate ? `Последнее обновление: ${lastUpdate.toLocaleString()}\n\n` : '';
+      
+      fs.writeFileSync(path.join(dataDir, 'telegram-gifts-details.txt'), updateTimeString + detailedInfo);
       console.log('Сохранена детальная информация о подарках в файл telegram-gifts-details.txt');
       
       return;
@@ -1191,6 +1236,10 @@ async function startMonitoring() {
     console.log(`Устанавливаем интервал проверки: ${CHECK_INTERVAL} мс`);
     setInterval(checkAndNotifyAll, CHECK_INTERVAL);
     
+    // Запускаем периодическую проверку актуальности данных (каждые 60 секунд)
+    console.log('Устанавливаем интервал проверки актуальности данных: 60 секунд');
+    setInterval(checkDataFreshness, 60000);
+    
     // Обработка сигналов завершения для корректного завершения работы
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
@@ -1498,9 +1547,26 @@ async function handleListCommand(chatId) {
     // Сортируем подарки по редкости
     const sortedGifts = sortGiftsByRarity(currentGifts);
     
+    // Получаем дату последнего обновления
+    const lastUpdate = getLastUpdateTime();
+    
+    // Проверка на неактуальность данных
+    let warningText = '';
+    if (lastUpdate) {
+      const now = new Date();
+      const dataAge = now - lastUpdate;
+      if (dataAge > MAX_DATA_AGE_MS) {
+        warningText = `\n\n⚠️ *Внимание!* Данные устарели (не обновлялись ${Math.floor(dataAge / 60000)} мин)`;
+      }
+    }
+    
+    const lastUpdateText = lastUpdate 
+      ? `\n\n🕒 Последнее обновление: ${lastUpdate.toLocaleString('ru-RU')}${warningText}` 
+      : '';
+    
     // Отправляем общую информацию
     await bot.sendMessage(chatId, 
-      `🎁 *Доступные подарки (всего ${sortedGifts.length})*\n\nОтсортировано по редкости, самые редкие первые:`, 
+      `🎁 *Доступные подарки (всего ${sortedGifts.length})*\n\nОтсортировано по редкости, самые редкие первые:${lastUpdateText}`, 
       { 
         parse_mode: 'Markdown',
         ...getMainKeyboard()
@@ -1568,9 +1634,26 @@ async function handleDetailsCommand(chatId) {
     // Сортируем подарки по редкости
     const sortedGifts = sortGiftsByRarity(currentGifts);
     
+    // Получаем дату последнего обновления
+    const lastUpdate = getLastUpdateTime();
+    
+    // Проверка на неактуальность данных
+    let warningText = '';
+    if (lastUpdate) {
+      const now = new Date();
+      const dataAge = now - lastUpdate;
+      if (dataAge > MAX_DATA_AGE_MS) {
+        warningText = `\n\n⚠️ *Внимание!* Данные устарели (не обновлялись ${Math.floor(dataAge / 60000)} мин)`;
+      }
+    }
+    
+    const lastUpdateText = lastUpdate 
+      ? `\n\n🕒 Последнее обновление: ${lastUpdate.toLocaleString('ru-RU')}${warningText}` 
+      : '';
+    
     // Отправляем информацию о 5 самых редких подарках
     await bot.sendMessage(chatId, 
-      '🔍 *Детальная информация о самых редких подарках:*', 
+      `🔍 *Детальная информация о самых редких подарках:*${lastUpdateText}`, 
       { 
         parse_mode: 'Markdown',
         ...getMainKeyboard() 
@@ -1657,6 +1740,70 @@ async function gracefulShutdown(signal) {
   } catch (error) {
     console.error('Ошибка при завершении работы:', error.message);
     process.exit(1);
+  }
+}
+
+// Функция для проверки актуальности данных
+async function checkDataFreshness() {
+  try {
+    const lastUpdate = getLastUpdateTime();
+    
+    if (!lastUpdate) {
+      console.log('Невозможно проверить актуальность данных: дата последнего обновления отсутствует');
+      return;
+    }
+    
+    const now = new Date();
+    const dataAge = now - lastUpdate;
+    
+    // Если данные старше MAX_DATA_AGE_MS и уведомление еще не отправлено
+    if (dataAge > MAX_DATA_AGE_MS && !staleDateAlertSent) {
+      console.log(`Предупреждение: данные не обновлялись ${Math.floor(dataAge / 60000)} минут!`);
+      
+      // Загружаем ID чатов для рассылки уведомлений
+      const chatIds = loadChatIds();
+      
+      // Отправляем предупреждение всем пользователям
+      for (const chatId of chatIds) {
+        try {
+          await bot.sendMessage(chatId,
+            `⚠️ *Внимание! Возможны проблемы с обновлением данных!*\n\n` +
+            `Данные о подарках не обновлялись более ${Math.floor(dataAge / 60000)} минут.\n` +
+            `Последнее обновление было в ${lastUpdate.toLocaleString('ru-RU')}`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (error) {
+          console.error(`Ошибка при отправке предупреждения о неактуальности данных пользователю ${chatId}:`, error.message);
+        }
+      }
+      
+      // Устанавливаем флаг, что уведомление уже отправлено
+      staleDateAlertSent = true;
+    }
+    // Если данные снова стали актуальными, сбрасываем флаг
+    else if (dataAge <= MAX_DATA_AGE_MS && staleDateAlertSent) {
+      console.log('Данные снова актуальны, сбрасываем флаг предупреждения');
+      staleDateAlertSent = false;
+      
+      // Загружаем ID чатов для рассылки уведомлений
+      const chatIds = loadChatIds();
+      
+      // Отправляем сообщение об актуализации данных
+      for (const chatId of chatIds) {
+        try {
+          await bot.sendMessage(chatId,
+            `✅ *Обновление данных восстановлено!*\n\n` +
+            `Данные о подарках снова обновляются корректно.\n` +
+            `Последнее обновление: ${lastUpdate.toLocaleString('ru-RU')}`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (error) {
+          console.error(`Ошибка при отправке сообщения о восстановлении обновления данных пользователю ${chatId}:`, error.message);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Ошибка при проверке актуальности данных:', error.message);
   }
 }
 
